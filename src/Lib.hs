@@ -44,15 +44,15 @@ import Text.ParserCombinators.Parsec.Char (digit)
 someFunc :: IO ()
 someFunc = do
   (expr : _) <- getArgs
-  putStrLn (readExpr expr)
+  print $ eval $ readExpr expr
 
 symbol :: Parser Char
 symbol = oneOf "!$%|*+-/:<=>?@^_~"
 
-readExpr :: String -> String
+readExpr :: String -> LispVal
 readExpr input = case parse parseExpr "lisp" input of
-  Left err -> "No match: " ++ show err
-  Right val -> "Found value"
+  Left err -> String $ "No match: " ++ show err
+  Right val -> val
 
 spaces :: Parser ()
 spaces = skipMany1 space
@@ -72,6 +72,28 @@ data LispVal
   | Ratio Rational
   | Complex (Complex Double)
   | Vector (Array Int LispVal)
+
+instance Show LispVal where show = showVal
+
+showVal :: LispVal -> String
+showVal (String contents) = "\"" ++ contents ++ "\""
+showVal (Atom name) = name
+showVal (Number contents) = show contents
+showVal (Bool True) = "#t"
+showVal (Bool False) = "#f"
+showVal (Character c) = "\'" ++ show c ++ "\'"
+showVal (Float f) = show f
+showVal (Ratio r) = show r
+showVal (Complex c) = show c
+showVal (List contents) = "(" ++ unwordsList contents ++ ")"
+showVal (DottedList head tail) =
+  "(" ++ unwordsList head ++ " . "
+    ++ showVal tail
+    ++ ")"
+showVal (Vector array) = show array
+
+unwordsList :: [LispVal] -> String
+unwordsList = unwords . map showVal
 
 parseString :: Parser LispVal
 parseString = do
@@ -285,3 +307,62 @@ parseExpr =
     <|> parseUnquote
     <|> try parseVector
     <|> parseListAllWithoutTry
+
+eval :: LispVal -> LispVal
+eval val@(String _) = val
+eval val@(Number _) = val
+eval val@(Bool _) = val
+eval (List [Atom "quote", val]) = val
+eval (List (Atom func : args)) = apply func $ map eval args
+
+apply :: String -> [LispVal] -> LispVal
+apply func args = maybe (Bool False) ($ args) $ lookup func primitives
+
+{-
+boolean? --Boolean? returns #t if obj is either #t or #f and returns #f otherwise.
+pair? --Pair? returns #t if obj is a pair, and otherwise returns #f.
+null? --Returns #t if obj is the empty list, otherwise returns #f.
+list? --Returns #t if obj is a list, otherwise returns #f.
+symbol? --Returns #t if obj is a symbol, otherwise returns #f.
+char? --Returns #t if obj is a character, otherwise returns #f.
+string? --Returns #t if obj is a string, otherwise returns #f.
+vector? --Returns #t if obj is a vector, otherwise returns #f.
+-}
+primitives :: [(String, [LispVal] -> LispVal)]
+primitives =
+  [ ("+", numericBinop (+)),
+    ("-", numericBinop (-)),
+    ("*", numericBinop (*)),
+    ("/", numericBinop div),
+    ("mod", numericBinop mod),
+    ("quotient", numericBinop quot),
+    ("remainder", numericBinop rem)
+  ]
+
+numericBinop :: (Integer -> Integer -> Integer) -> [LispVal] -> LispVal
+numericBinop op params = Number $ foldl1 op $ map unpackNum params
+
+unpackNum :: LispVal -> Integer
+unpackNum (Number n) = n
+unpackNum (String n) =
+  let parsed = reads n :: [(Integer, String)]
+   in if null parsed
+        then 0
+        else fst $ head parsed
+unpackNum (List [n]) = unpackNum n
+unpackNum _ = 0
+
+{-
+data LispVal
+  = Atom String
+  | List [LispVal]
+  | DottedList [LispVal] LispVal
+  | Number Integer
+  | String String
+  | Bool Bool
+  | Character Char
+  | Float Double
+  | Ratio Rational
+  | Complex (Complex Double)
+  | Vector (Array Int LispVal)
+-}
