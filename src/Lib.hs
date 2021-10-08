@@ -64,10 +64,10 @@ data LispVal
   = Atom String
   | List [LispVal]
   | DottedList [LispVal] LispVal
-  | Number Integer
   | String String
   | Bool Bool
   | Character Char
+  | Number Integer
   | Float Double
   | Ratio Rational
   | Complex (Complex Double)
@@ -327,6 +327,12 @@ symbol? --Returns #t if obj is a symbol, otherwise returns #f.
 char? --Returns #t if obj is a character, otherwise returns #f.
 string? --Returns #t if obj is a string, otherwise returns #f.
 vector? --Returns #t if obj is a vector, otherwise returns #f.
+
+number?
+complex?
+real?
+rational?
+integer?
 -}
 primitives :: [(String, [LispVal] -> LispVal)]
 primitives =
@@ -336,20 +342,101 @@ primitives =
     ("/", numericBinop div),
     ("mod", numericBinop mod),
     ("quotient", numericBinop quot),
-    ("remainder", numericBinop rem)
+    ("remainder", numericBinop rem),
+    ("boolean?", unaryOp booleanOp),
+    ("pair?", unaryOp pairOp),
+    ("null?", unaryOp nullOp),
+    ("list?", unaryOp listOp),
+    ("symbol?", unaryOp symbolOp),
+    ("char?", unaryOp charOp),
+    ("string?", unaryOp stringOp),
+    ("vector?", unaryOp vectorOp),
+    ("integer?", unaryOp integerOp),
+    ("rational?", unaryOp rationalOp),
+    ("real?", unaryOp realOp),
+    ("complex?", unaryOp complexOp),
+    ("number?", unaryOp numberOp),
+    -- symbol handler
+    ("symbol->string", unaryOp symbol2stringOp),
+    ("string->symbol", unaryOp string2symbolOp)
   ]
+
+string2symbolOp :: LispVal -> LispVal
+string2symbolOp (String s) = Atom s
+string2symbolOp n = error $ show n ++ " is not string."
+
+symbol2stringOp :: LispVal -> LispVal
+symbol2stringOp (Atom a) = String a
+symbol2stringOp n = error $ show n ++ " is not atom."
+
+integerOp :: LispVal -> LispVal
+integerOp (Number _) = Bool True 
+integerOp _ = Bool False 
+
+
+rationalOp :: LispVal -> LispVal
+rationalOp (Number _) = Bool True 
+rationalOp (Ratio _) = Bool True 
+rationalOp _ = Bool False 
+
+realOp :: LispVal -> LispVal
+realOp (Number _) = Bool True 
+realOp (Ratio _) = Bool True 
+realOp (Float _ ) = Bool True 
+realOp _ = Bool False 
+
+complexOp :: LispVal -> LispVal
+complexOp (Number _) = Bool True 
+complexOp (Ratio _) = Bool True 
+complexOp (Float _ ) = Bool True 
+complexOp (Complex _ ) = Bool True 
+complexOp _ = Bool False 
+
+numberOp :: LispVal -> LispVal
+numberOp = complexOp
+
+vectorOp :: LispVal -> LispVal
+vectorOp (Vector _) = Bool True 
+vectorOp _ = Bool False 
+
+stringOp :: LispVal -> LispVal
+stringOp (String _) = Bool True 
+stringOp _ = Bool False 
+
+charOp :: LispVal -> LispVal
+charOp (Character _) = Bool True 
+charOp _ = Bool False 
+
+symbolOp :: LispVal -> LispVal
+symbolOp (Atom _) = Bool True 
+symbolOp _ = Bool False 
+
+listOp :: LispVal -> LispVal
+listOp (List _) = Bool True 
+listOp _ = Bool False 
+
+nullOp :: LispVal -> LispVal
+nullOp (List []) = Bool True 
+nullOp _ = Bool False 
+
+pairOp :: LispVal -> LispVal
+pairOp (List (a:_)) = Bool True 
+pairOp (DottedList _ _) = Bool True 
+pairOp _ = Bool False  
+
+booleanOp :: LispVal -> LispVal
+booleanOp (Bool _) = Bool True  
+booleanOp _ = Bool False 
+
+unaryOp :: (LispVal -> LispVal) -> [LispVal] -> LispVal
+unaryOp f [v] = f v
+unaryOp _ _   = error "only support one argument."
 
 numericBinop :: (Integer -> Integer -> Integer) -> [LispVal] -> LispVal
 numericBinop op params = Number $ foldl1 op $ map unpackNum params
 
 unpackNum :: LispVal -> Integer
 unpackNum (Number n) = n
-unpackNum (String n) =
-  let parsed = reads n :: [(Integer, String)]
-   in if null parsed
-        then 0
-        else fst $ head parsed
-unpackNum (List [n]) = unpackNum n
 unpackNum _ = 0
 
 {-
