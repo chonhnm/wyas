@@ -9,7 +9,7 @@ import Control.Exception (throw)
 import Data.Char (digitToInt, isHexDigit, toLower, toUpper)
 import Data.Complex (Complex ((:+)))
 import Data.Foldable (Foldable (foldl'))
-import Data.Ratio (Ratio)
+import Data.Ratio (Ratio, numerator, denominator)
 import GHC.Arr (Array, listArray)
 import GHC.Real ((%))
 import GHC.Unicode (isHexDigit)
@@ -40,6 +40,8 @@ import Text.ParserCombinators.Parsec
     (<|>),
   )
 import Text.ParserCombinators.Parsec.Char (digit)
+import GHC.Float (rationalToDouble)
+import qualified Data.Functor
 
 someFunc :: IO ()
 someFunc = do
@@ -220,6 +222,8 @@ parseComplex = do
 toDouble :: LispVal -> Double
 toDouble (Float f) = realToFrac f
 toDouble (Number n) = fromIntegral n
+toDouble (Ratio r) = rationalToDouble  (numerator r) (denominator r)
+toDouble _ = error "not implement"
 
 -- parse list
 parseList :: Parser LispVal
@@ -289,7 +293,7 @@ parseNumber1 = do
   return $ (Number . read) num
 
 parseNumber2 :: Parser LispVal
-parseNumber2 = many1 digit >>= return . Number . read
+parseNumber2 = many1 digit Data.Functor.<&> (Number . read)
 
 parseExpr :: Parser LispVal
 parseExpr =
@@ -370,63 +374,63 @@ symbol2stringOp (Atom a) = String a
 symbol2stringOp n = error $ show n ++ " is not atom."
 
 integerOp :: LispVal -> LispVal
-integerOp (Number _) = Bool True 
-integerOp _ = Bool False 
+integerOp (Number _) = Bool True
+integerOp _ = Bool False
 
 
 rationalOp :: LispVal -> LispVal
-rationalOp (Number _) = Bool True 
-rationalOp (Ratio _) = Bool True 
-rationalOp _ = Bool False 
+rationalOp (Number _) = Bool True
+rationalOp (Ratio _) = Bool True
+rationalOp _ = Bool False
 
 realOp :: LispVal -> LispVal
-realOp (Number _) = Bool True 
-realOp (Ratio _) = Bool True 
-realOp (Float _ ) = Bool True 
-realOp _ = Bool False 
+realOp (Number _) = Bool True
+realOp (Ratio _) = Bool True
+realOp (Float _ ) = Bool True
+realOp _ = Bool False
 
 complexOp :: LispVal -> LispVal
-complexOp (Number _) = Bool True 
-complexOp (Ratio _) = Bool True 
-complexOp (Float _ ) = Bool True 
-complexOp (Complex _ ) = Bool True 
-complexOp _ = Bool False 
+complexOp (Number _) = Bool True
+complexOp (Ratio _) = Bool True
+complexOp (Float _ ) = Bool True
+complexOp (Complex _ ) = Bool True
+complexOp _ = Bool False
 
 numberOp :: LispVal -> LispVal
 numberOp = complexOp
 
 vectorOp :: LispVal -> LispVal
-vectorOp (Vector _) = Bool True 
-vectorOp _ = Bool False 
+vectorOp (Vector _) = Bool True
+vectorOp _ = Bool False
 
 stringOp :: LispVal -> LispVal
-stringOp (String _) = Bool True 
-stringOp _ = Bool False 
+stringOp (String _) = Bool True
+stringOp _ = Bool False
 
 charOp :: LispVal -> LispVal
-charOp (Character _) = Bool True 
-charOp _ = Bool False 
+charOp (Character _) = Bool True
+charOp _ = Bool False
 
 symbolOp :: LispVal -> LispVal
-symbolOp (Atom _) = Bool True 
-symbolOp _ = Bool False 
+symbolOp (Atom _) = Bool True
+symbolOp _ = Bool False
 
 listOp :: LispVal -> LispVal
-listOp (List _) = Bool True 
-listOp _ = Bool False 
+listOp (List _) = Bool True
+listOp _ = Bool False
 
 nullOp :: LispVal -> LispVal
-nullOp (List []) = Bool True 
-nullOp _ = Bool False 
+nullOp (List []) = Bool True
+nullOp _ = Bool False
 
 pairOp :: LispVal -> LispVal
-pairOp (List (a:_)) = Bool True 
-pairOp (DottedList _ _) = Bool True 
-pairOp _ = Bool False  
+pairOp (List (a:_)) = Bool True
+pairOp (DottedList _ _) = Bool True
+pairOp _ = Bool False
 
 booleanOp :: LispVal -> LispVal
-booleanOp (Bool _) = Bool True  
-booleanOp _ = Bool False 
+booleanOp (Bool _) = Bool True
+booleanOp _ = Bool False
 
 unaryOp :: (LispVal -> LispVal) -> [LispVal] -> LispVal
 unaryOp f [v] = f v
