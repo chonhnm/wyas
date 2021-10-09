@@ -9,13 +9,16 @@ import Control.Exception (throw)
 import Data.Char (digitToInt, isHexDigit, toLower, toUpper)
 import Data.Complex (Complex ((:+)))
 import Data.Foldable (Foldable (foldl'))
-import Data.Ratio (Ratio, numerator, denominator)
+import qualified Data.Functor
+import Data.Ratio (Ratio, denominator, numerator)
+import Foreign.C (isValidErrno)
 import GHC.Arr (Array, listArray)
+import GHC.Float (rationalToDouble)
 import GHC.Real ((%))
 import GHC.Unicode (isHexDigit)
 import Numeric (readFloat, readHex, readOct)
 import System.Environment (getArgs)
-import Text.Parsec (alphaNum, anyChar, digit, optional, sepBy, sepEndBy, skipMany)
+import Text.Parsec (ParseError, alphaNum, anyChar, digit, optional, sepBy, sepEndBy, skipMany)
 import Text.Parsec.Char (digit)
 import Text.ParserCombinators.Parsec
   ( Parser,
@@ -40,21 +43,20 @@ import Text.ParserCombinators.Parsec
     (<|>),
   )
 import Text.ParserCombinators.Parsec.Char (digit)
-import GHC.Float (rationalToDouble)
-import qualified Data.Functor
-import Foreign.C (isValidErrno)
+import Text.Show (Show)
 
 someFunc :: IO ()
 someFunc = do
   (expr : _) <- getArgs
-  print $ eval $ readExpr expr
+  evaled <- return $ liftM show $ eval $ readExpr expr
+  putStrLn $ extractValue $ trapError evaled
 
 symbol :: Parser Char
 symbol = oneOf "!$%|*+-/:<=>?@^_~"
 
-readExpr :: String -> LispVal
+readExpr :: String -> ThrowsError LispVal
 readExpr input = case parse parseExpr "lisp" input of
-  Left err -> String $ "No match: " ++ show err
+  Left err -> throwError $ Parser err
   Right val -> val
 
 spaces :: Parser ()
@@ -223,7 +225,7 @@ parseComplex = do
 toDouble :: LispVal -> Double
 toDouble (Float f) = realToFrac f
 toDouble (Number n) = fromIntegral n
-toDouble (Ratio r) = rationalToDouble  (numerator r) (denominator r)
+toDouble (Ratio r) = rationalToDouble (numerator r) (denominator r)
 toDouble _ = error "not implement"
 
 -- parse list
@@ -313,7 +315,7 @@ parseExpr =
     <|> try parseVector
     <|> parseListAllWithoutTry
 
-eval :: LispVal -> LispVal
+eval :: LispVal -> ThrowsError LispVal
 eval val@(String _) = val
 eval val@(Number _) = val
 eval val@(Bool _) = val
@@ -321,14 +323,19 @@ eval val@(Character _) = val
 eval val@(Float _) = val
 eval val@(Ratio _) = val
 eval val@(Complex _) = val
-eval val@(Vector _) = val 
+eval val@(Vector _) = val
 eval val@(DottedList _ _) = val
 eval (List [Atom "quote", val]) = val
 eval (List [Atom "quasiquote", val]) = val
 eval (List (Atom func : args)) = apply func $ map eval args
+eval badForm = throwError $ BadSpecialForm "Unrecognized special form" badForm
 
-apply :: String -> [LispVal] -> LispVal
-apply func args = maybe (Bool False) ($ args) $ lookup func primitives
+apply :: String -> [LispVal] -> ThrowsError LispVal
+apply func args =
+  maybe
+    (throwError $ NotFunction "Unrecognized primitive function args" func)
+    ($ args)
+    $ lookup func primitives
 
 {-
 boolean? --Boolean? returns #t if obj is either #t or #f and returns #f otherwise.
@@ -346,7 +353,7 @@ real?
 rational?
 integer?
 -}
-primitives :: [(String, [LispVal] -> LispVal)]
+primitives :: [(String, [LispVal] -> ThrowsError LispVal)]
 primitives =
   [ ("+", numericBinop (+)),
     ("-", numericBinop (-)),
@@ -385,7 +392,6 @@ integerOp :: LispVal -> LispVal
 integerOp (Number _) = Bool True
 integerOp _ = Bool False
 
-
 rationalOp :: LispVal -> LispVal
 rationalOp (Number _) = Bool True
 rationalOp (Ratio _) = Bool True
@@ -394,14 +400,14 @@ rationalOp _ = Bool False
 realOp :: LispVal -> LispVal
 realOp (Number _) = Bool True
 realOp (Ratio _) = Bool True
-realOp (Float _ ) = Bool True
+realOp (Float _) = Bool True
 realOp _ = Bool False
 
 complexOp :: LispVal -> LispVal
 complexOp (Number _) = Bool True
 complexOp (Ratio _) = Bool True
-complexOp (Float _ ) = Bool True
-complexOp (Complex _ ) = Bool True
+complexOp (Float _) = Bool True
+complexOp (Complex _) = Bool True
 complexOp _ = Bool False
 
 numberOp :: LispVal -> LispVal
@@ -432,7 +438,7 @@ nullOp (List []) = Bool True
 nullOp _ = Bool False
 
 pairOp :: LispVal -> LispVal
-pairOp (List (a:_)) = Bool True
+pairOp (List (a : _)) = Bool True
 pairOp (DottedList _ _) = Bool True
 pairOp _ = Bool False
 
@@ -442,26 +448,48 @@ booleanOp _ = Bool False
 
 unaryOp :: (LispVal -> LispVal) -> [LispVal] -> LispVal
 unaryOp f [v] = f v
-unaryOp _ _   = error "only support one argument."
+unaryOp _ _ = error "only support one argument."
 
-numericBinop :: (Integer -> Integer -> Integer) -> [LispVal] -> LispVal
+numericBinop :: (Integer -> Integer -> Integer) -> [LispVal] -> ThrowsError LispVal
+numericBinop op [] = throwError $ NumArgs 2 []
+numericBinop op singleVal@[_] = throwError $ NumArgs 2 singleVal
 numericBinop op params = Number $ foldl1 op $ map unpackNum params
 
-unpackNum :: LispVal -> Integer
+unpackNum :: LispVal -> ThrowsError Integer
 unpackNum (Number n) = n
-unpackNum _ = 0
+unpackNum notNum = throwError $ TypeMismatch "number" notNum
 
-{-
-data LispVal
-  = Atom String
-  | List [LispVal]
-  | DottedList [LispVal] LispVal
-  | Number Integer
-  | String String
-  | Bool Bool
-  | Character Char
-  | Float Double
-  | Ratio Rational
-  | Complex (Complex Double)
-  | Vector (Array Int LispVal)
--}
+-- error checking and exceptions
+
+data LispError
+  = NumArgs Integer [LispVal]
+  | TypeMismatch String LispVal
+  | Parser ParseError
+  | BadSpecialForm String LispVal
+  | NotFunction String String
+  | UnboundVar String String
+  | Default String
+
+showError :: LispError -> String
+showError (UnboundVar message varname) = message ++ ": " ++ varname
+showError (BadSpecialForm message form) = message ++ ": " ++ show form
+showError (NotFunction message func) = message ++ ": " ++ show func
+showError (NumArgs expected found) =
+  "Expected " ++ show expected
+    ++ " args; found values "
+    ++ unwordsList found
+showError (TypeMismatch expected found) =
+  "Invalid type: expected " ++ expected
+    ++ ", found "
+    ++ show found
+showError (Parser parseErr) = "Parse error at " ++ show parseErr
+showError (Default str) = show str
+
+instance Show LispError where show = showError
+
+type ThrowsError = Either LispError
+
+trapError action = catchError action (return . show)
+
+extractValue :: ThrowsError a -> a
+extractValue (Right val) = val
