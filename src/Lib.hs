@@ -44,11 +44,12 @@ import Text.ParserCombinators.Parsec
   )
 import Text.ParserCombinators.Parsec.Char (digit)
 import Text.Show (Show)
+import Control.Monad.Except (throwError, catchError)
 
 someFunc :: IO ()
 someFunc = do
   (expr : _) <- getArgs
-  evaled <- return $ liftM show $ eval $ readExpr expr
+  evaled <- return $ fmap show  $ readExpr expr >>= eval
   putStrLn $ extractValue $ trapError evaled
 
 symbol :: Parser Char
@@ -57,7 +58,7 @@ symbol = oneOf "!$%|*+-/:<=>?@^_~"
 readExpr :: String -> ThrowsError LispVal
 readExpr input = case parse parseExpr "lisp" input of
   Left err -> throwError $ Parser err
-  Right val -> val
+  Right val -> return val
 
 spaces :: Parser ()
 spaces = skipMany1 space
@@ -316,18 +317,18 @@ parseExpr =
     <|> parseListAllWithoutTry
 
 eval :: LispVal -> ThrowsError LispVal
-eval val@(String _) = val
-eval val@(Number _) = val
-eval val@(Bool _) = val
-eval val@(Character _) = val
-eval val@(Float _) = val
-eval val@(Ratio _) = val
-eval val@(Complex _) = val
-eval val@(Vector _) = val
-eval val@(DottedList _ _) = val
-eval (List [Atom "quote", val]) = val
-eval (List [Atom "quasiquote", val]) = val
-eval (List (Atom func : args)) = apply func $ map eval args
+eval val@(String _) = return val
+eval val@(Number _) = return  val
+eval val@(Bool _) = return val
+eval val@(Character _) = return val
+eval val@(Float _) = return val
+eval val@(Ratio _) = return val
+eval val@(Complex _) = return val
+eval val@(Vector _) = return val
+eval val@(DottedList _ _) = return val
+eval (List [Atom "quote", val]) = return  val
+eval (List [Atom "quasiquote", val]) = return val
+eval (List (Atom func : args)) =  mapM  eval args >>= apply func
 eval badForm = throwError $ BadSpecialForm "Unrecognized special form" badForm
 
 apply :: String -> [LispVal] -> ThrowsError LispVal
@@ -335,7 +336,7 @@ apply func args =
   maybe
     (throwError $ NotFunction "Unrecognized primitive function args" func)
     ($ args)
-    $ lookup func primitives
+    (lookup func primitives)
 
 {-
 boolean? --Boolean? returns #t if obj is either #t or #f and returns #f otherwise.
@@ -446,17 +447,17 @@ booleanOp :: LispVal -> LispVal
 booleanOp (Bool _) = Bool True
 booleanOp _ = Bool False
 
-unaryOp :: (LispVal -> LispVal) -> [LispVal] -> LispVal
-unaryOp f [v] = f v
+unaryOp :: (LispVal -> LispVal) -> [LispVal] -> ThrowsError LispVal
+unaryOp f [v] = return $ f v
 unaryOp _ _ = error "only support one argument."
 
 numericBinop :: (Integer -> Integer -> Integer) -> [LispVal] -> ThrowsError LispVal
 numericBinop op [] = throwError $ NumArgs 2 []
 numericBinop op singleVal@[_] = throwError $ NumArgs 2 singleVal
-numericBinop op params = Number $ foldl1 op $ map unpackNum params
+numericBinop op params =  mapM unpackNum params >>= return . Number . foldl1 op
 
 unpackNum :: LispVal -> ThrowsError Integer
-unpackNum (Number n) = n
+unpackNum (Number n) = return n
 unpackNum notNum = throwError $ TypeMismatch "number" notNum
 
 -- error checking and exceptions

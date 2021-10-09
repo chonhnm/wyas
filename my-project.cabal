@@ -32,7 +32,7 @@ library
       src
   build-depends:
       base >=4.7 && <5
-    , libghc6-mtl-dev
+    , mtl
     , parsec
   default-language: Haskell2010
 
@@ -45,7 +45,7 @@ executable my-project-exe
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       base >=4.7 && <5
-    , libghc6-mtl-dev
+    , mtl
     , my-project
     , parsec
   default-language: Haskell2010
@@ -60,7 +60,7 @@ test-suite my-project-test
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       base >=4.7 && <5
-    , libghc6-mtl-dev
+    , mtl
     , my-project
     , parsec
   default-language: Haskell2010
