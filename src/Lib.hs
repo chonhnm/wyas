@@ -42,6 +42,7 @@ import Text.ParserCombinators.Parsec
 import Text.ParserCombinators.Parsec.Char (digit)
 import GHC.Float (rationalToDouble)
 import qualified Data.Functor
+import Foreign.C (isValidErrno)
 
 someFunc :: IO ()
 someFunc = do
@@ -316,7 +317,14 @@ eval :: LispVal -> LispVal
 eval val@(String _) = val
 eval val@(Number _) = val
 eval val@(Bool _) = val
+eval val@(Character _) = val
+eval val@(Float _) = val
+eval val@(Ratio _) = val
+eval val@(Complex _) = val
+eval val@(Vector _) = val 
+eval val@(DottedList _ _) = val
 eval (List [Atom "quote", val]) = val
+eval (List [Atom "quasiquote", val]) = val
 eval (List (Atom func : args)) = apply func $ map eval args
 
 apply :: String -> [LispVal] -> LispVal
