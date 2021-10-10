@@ -49,8 +49,11 @@ import Control.Monad.Except (throwError, catchError)
 someFunc :: IO ()
 someFunc = do
   (expr : _) <- getArgs
-  evaled <- return $ fmap show  $ readExpr expr >>= eval
+  let evaled = fmap show  $ readExpr expr >>= eval
   putStrLn $ extractValue $ trapError evaled
+
+trapError :: ThrowsError String -> ThrowsError String
+trapError action = catchError action (return . show)
 
 symbol :: Parser Char
 symbol = oneOf "!$%|*+-/:<=>?@^_~"
@@ -490,7 +493,7 @@ instance Show LispError where show = showError
 
 type ThrowsError = Either LispError
 
-trapError action = catchError action (return . show)
+
 
 extractValue :: ThrowsError a -> a
 extractValue (Right val) = val
