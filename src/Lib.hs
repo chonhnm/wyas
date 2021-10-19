@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE ExistentialQuantification #-}
 
 module Lib
   ( someFunc,
@@ -340,6 +341,7 @@ eval (List [Atom "if", pred, conseq, alt]) =
       Bool False -> eval alt
       _ -> throwError $ TypeMismatch "boolean" pred
 eval (List (Atom func : args)) = mapM eval args >>= apply func
+eval val@(Atom _) = return val 
 eval badForm = throwError $ BadSpecialForm "Unrecognized special form" badForm
 
 apply :: String -> [LispVal] -> ThrowsError LispVal
@@ -409,7 +411,8 @@ primitives =
     ("cdr", cdr),
     ("cons", cons),
     ("eq?", eqv),
-    ("eqv?", eqv)
+    ("eqv?", eqv),
+    ("equal?", equal)
   ]
 
 boolBinop :: (LispVal -> ThrowsError a) -> (a -> a -> Bool) -> [LispVal] -> ThrowsError LispVal
@@ -583,21 +586,40 @@ eqv [Character arg1, Character arg2] = return $ Bool $ arg1 == arg2
 eqv [String arg1, String arg2] = return $ Bool $ arg1 == arg2
 eqv [Atom arg1, Atom arg2] = return $ Bool $ arg1 == arg2
 eqv [DottedList xs x, DottedList ys y] = eqv [List $ xs ++ [x], List $ ys ++ [y]]
-eqv [List arg1, List arg2] =
-  return $
-    Bool $
-      (length arg1 == length arg2)
-        && all eqvPair (zip arg1 arg2)
-eqv [Vector arg1, Vector arg2] =
-  return $
-    Bool $
-      numElements arg1 == numElements arg2
-        && all eqvPair (zip (elems arg1) (elems arg2))
+eqv listPair@[List _, List _] = eqvList eqv listPair
+eqv [Vector arg1, Vector arg2] = eqv [List $ elems arg1, List $ elems arg2]
 eqv [_, _] = return $ Bool False
 eqv badArgList = throwError $ NumArgs 2 badArgList
 
-eqvPair :: (LispVal, LispVal) -> Bool
-eqvPair (x1, x2) = case eqv [x1, x2] of
-  Left err -> False
-  Right (Bool val) -> val
-  Right _ -> False
+data Unpacker = forall a. Eq a => AnyUnPacker (LispVal -> ThrowsError a)
+
+unpackEquals :: LispVal -> LispVal -> Unpacker -> ThrowsError Bool
+unpackEquals arg1 arg2 (AnyUnPacker unpacker) =
+  do
+    unpacked1 <- unpacker arg1
+    unpacked2 <- unpacker arg2
+    return $ unpacked1 == unpacked2
+  `catchError` const  (return False)
+
+
+equal :: [LispVal] -> ThrowsError LispVal
+equal listPair@[List _, List _] = eqvList equal listPair
+equal [DottedList xs x, DottedList ys y] = equal [List $ xs ++ [x], List $ ys ++ [y]]
+equal [Vector arg1, Vector arg2] = equal [List $ elems arg1, List $ elems arg2]
+equal [arg1, arg2] = do
+  primitiveEquals <- or <$> mapM (unpackEquals arg1 arg2)
+                     [AnyUnPacker unpackNum, AnyUnPacker unpackStr, AnyUnPacker unpackBool]
+  eqvEquals <- eqv [arg1, arg2]
+  return $ Bool (primitiveEquals || let (Bool x) = eqvEquals in x)
+equal badArgList = throwError $ NumArgs 2 badArgList
+
+eqvList :: ([LispVal] -> ThrowsError LispVal) -> [LispVal] -> ThrowsError LispVal
+eqvList eqvFun [List arg1, List arg2] =
+  return $
+    Bool $
+      (length arg1 == length arg2) && all eqvPair (zip arg1 arg2)
+      where eqvPair (x1, x2) = case eqvFun [x1, x2] of
+                                    Left err -> False
+                                    Right (Bool val) -> val
+                                    Right _ -> False
+eqvList _ _ = throwError $ Default "not supported"
