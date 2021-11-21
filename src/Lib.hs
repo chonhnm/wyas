@@ -84,6 +84,7 @@ data LispVal
   | Ratio Rational
   | Complex (Complex Double)
   | Vector (Array Int LispVal)
+  deriving Eq
 
 instance Show LispVal where show = showVal
 
@@ -343,6 +344,18 @@ eval (List [Atom "if", pred, conseq, alt]) =
       Bool False -> eval alt
       _ -> throwError $ TypeMismatch "boolean" pred
 eval (List (Atom "cond" : alts)) = cond alts
+eval form@(List (Atom "case" : key : clauses)) =
+  if null clauses
+  then throwError $ BadSpecialForm "no true clause in case expression: " form
+  else case head clauses of
+    List (Atom "else" : exprs) -> mapM eval exprs >>= return . last
+    List (List datums : exprs) -> do
+      result <- eval key
+      equality <- mapM (\x -> eqv [result, x]) datums
+      if Bool True `elem` equality
+        then mapM eval exprs >>= return . last
+        else eval $ List (Atom "case" : key : tail clauses)
+    _ -> throwError $ BadSpecialForm "ill-formed case expression: " form
 eval (List (Atom func : args)) = mapM eval args >>= apply func
 eval val@(Atom _) = return val
 eval badForm = throwError $ BadSpecialForm "Unrecognized special form" badForm
