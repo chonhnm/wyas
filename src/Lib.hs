@@ -1,5 +1,6 @@
-{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ExistentialQuantification #-}
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Lib
   ( someFunc,
@@ -9,7 +10,7 @@ where
 import Control.Arrow (ArrowChoice (right))
 import Control.Exception (throw)
 import Control.Monad.Except (catchError, throwError)
-import Data.Char (digitToInt, isHexDigit, toLower, toUpper)
+import Data.Char (digitToInt, isAlpha, isHexDigit, toLower, toUpper)
 import Data.Complex (Complex ((:+)))
 import Data.Foldable (Foldable (foldl'))
 import qualified Data.Functor
@@ -137,7 +138,8 @@ parseNumber =
     <|> parseBin
 
 parseDecimal1 :: Parser LispVal
-parseDecimal1 = Number . read <$> many1 digit
+-- parseDecimal1 = Number . read <$> many1 digit
+parseDecimal1 = fmap (Number . read) (many1 digit)
 
 parseDecimal2 :: Parser LispVal
 parseDecimal2 = do
@@ -292,7 +294,7 @@ parseUnquoteSplicing = do
 parseVector :: Parser LispVal
 parseVector = do
   string "#("
-  arrayVal <- sepBy parseExpr spaces
+  arrayVal <- sepEndBy parseExpr spaces
   char ')'
   return $ Vector $ listArray (0, length arrayVal - 1) arrayVal
 
@@ -340,9 +342,23 @@ eval (List [Atom "if", pred, conseq, alt]) =
       Bool True -> eval conseq
       Bool False -> eval alt
       _ -> throwError $ TypeMismatch "boolean" pred
+eval (List (Atom "cond" : alts)) = cond alts
 eval (List (Atom func : args)) = mapM eval args >>= apply func
-eval val@(Atom _) = return val 
+eval val@(Atom _) = return val
 eval badForm = throwError $ BadSpecialForm "Unrecognized special form" badForm
+
+cond :: [LispVal] -> ThrowsError LispVal
+cond [List [Atom "else", value]] = eval value
+cond (List [condition, value] : alts) =
+  do
+    result <- eval condition
+    boolResult :: Bool <- unpackBool result
+    if boolResult
+      then eval value
+      else cond alts
+cond (List a : _) = throwError $ NumArgs 2 a
+cond (a : _) = throwError $ NumArgs 2 [a]
+cond _ = throwError $ Default "Not viable alternative in cond"
 
 apply :: String -> [LispVal] -> ThrowsError LispVal
 apply func args =
@@ -599,16 +615,18 @@ unpackEquals arg1 arg2 (AnyUnPacker unpacker) =
     unpacked1 <- unpacker arg1
     unpacked2 <- unpacker arg2
     return $ unpacked1 == unpacked2
-  `catchError` const  (return False)
-
+    `catchError` const (return False)
 
 equal :: [LispVal] -> ThrowsError LispVal
 equal listPair@[List _, List _] = eqvList equal listPair
 equal [DottedList xs x, DottedList ys y] = equal [List $ xs ++ [x], List $ ys ++ [y]]
 equal [Vector arg1, Vector arg2] = equal [List $ elems arg1, List $ elems arg2]
 equal [arg1, arg2] = do
-  primitiveEquals <- or <$> mapM (unpackEquals arg1 arg2)
-                     [AnyUnPacker unpackNum, AnyUnPacker unpackStr, AnyUnPacker unpackBool]
+  primitiveEquals <-
+    or
+      <$> mapM
+        (unpackEquals arg1 arg2)
+        [AnyUnPacker unpackNum, AnyUnPacker unpackStr, AnyUnPacker unpackBool]
   eqvEquals <- eqv [arg1, arg2]
   return $ Bool (primitiveEquals || let (Bool x) = eqvEquals in x)
 equal badArgList = throwError $ NumArgs 2 badArgList
@@ -618,8 +636,9 @@ eqvList eqvFun [List arg1, List arg2] =
   return $
     Bool $
       (length arg1 == length arg2) && all eqvPair (zip arg1 arg2)
-      where eqvPair (x1, x2) = case eqvFun [x1, x2] of
-                                    Left err -> False
-                                    Right (Bool val) -> val
-                                    Right _ -> False
+  where
+    eqvPair (x1, x2) = case eqvFun [x1, x2] of
+      Left err -> False
+      Right (Bool val) -> val
+      Right _ -> False
 eqvList _ _ = throwError $ Default "not supported"
